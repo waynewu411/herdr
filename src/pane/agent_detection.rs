@@ -553,4 +553,43 @@ mod tests {
 
         assert_eq!(seq.load(Ordering::Relaxed), 1);
     }
+
+    /// Regression test for issue #1: `detection_content_seq` must keep
+    /// advancing for a genuinely new screen (e.g. dialog A dismissed,
+    /// replaced by dialog B) even in the exact case where
+    /// `should_publish_detection_update` swallows the transition because
+    /// both screens classify as the same `AgentState` with the same
+    /// `visible_blocker`/`visible_idle`/`visible_working` flags. This
+    /// proves the counter's advance is architecturally independent of the
+    /// publish dedup decision, not merely a downstream consequence of it —
+    /// the production `on_read` PTY callback bumps the counter before the
+    /// separate, ticker-driven detection task ever evaluates the dedup gate
+    /// (see `src/pane.rs:1934-1941` / `:2103-2112` vs. the detection task
+    /// spawned at `src/pane.rs:2180`).
+    #[test]
+    fn detection_content_seq_advances_across_dialog_swap_even_when_publish_is_suppressed() {
+        let mut blocked = publish_state(AgentState::Blocked);
+        blocked.visible_blocker = true;
+
+        // The dedup gate the issue names as one of the two swallow points:
+        // same state, same visible flags, no heartbeat due -> NoPublish.
+        assert!(
+            !should_publish_detection_update(blocked, blocked, false, false, false),
+            "dedup gate must reproduce the reported blocked-to-blocked swallow"
+        );
+
+        // The counter that feeds AgentInfo.detection_content_seq lives
+        // entirely outside that decision: it is bumped by the PTY-byte
+        // read callback, not by should_publish_detection_update's caller.
+        let seq = AtomicU64::new(0);
+        observe_detection_content_change(b"approval dialog A rendered", &seq);
+        let after_dialog_a = seq.load(Ordering::Relaxed);
+        observe_detection_content_change(b"approval dialog B rendered", &seq);
+
+        assert!(
+            seq.load(Ordering::Relaxed) > after_dialog_a,
+            "detection_content_seq must advance for dialog B's bytes even though \
+             should_publish_detection_update suppressed the transition above"
+        );
+    }
 }

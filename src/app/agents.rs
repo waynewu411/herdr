@@ -373,8 +373,7 @@ impl App {
         let detection_content_seq = self
             .state
             .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, pane_id)
-            .map(|runtime| runtime.detection_content_seq())
-            .unwrap_or(0);
+            .map(|runtime| runtime.detection_content_seq());
         Some(crate::api::schema::AgentInfo {
             terminal_id: pane.terminal_id,
             name: terminal.agent_name.clone(),
