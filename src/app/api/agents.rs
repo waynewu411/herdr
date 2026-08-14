@@ -452,6 +452,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agent_get_detection_content_seq_advances_across_blocked_to_blocked_redraw() {
+        // Regression test for issue #1: a pane can stay `agent_status: blocked`
+        // across two genuinely different screens (e.g. approval dialog A
+        // dismissed and immediately replaced by dialog B). `agent_status`
+        // itself is coarse and correctly stays `blocked` for both, but
+        // `detection_content_seq` must still move so a caller polling
+        // `agent get` can tell the underlying screen changed.
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_agent_name("reviewer".into());
+        terminal.set_detected_state(Some(Agent::GithubCopilot), AgentState::Blocked);
+        let (runtime, _rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.state.insert_test_runtime(pane_id, runtime);
+
+        let target = AgentTarget {
+            target: "reviewer".into(),
+        };
+        let first = app.handle_agent_get("req-1".into(), target.clone());
+        let first: SuccessResponse = serde_json::from_str(&first).unwrap();
+        let ResponseResult::AgentInfo { agent: first_agent } = first.result else {
+            panic!("expected AgentInfo result, got {:?}", first.result);
+        };
+        assert_eq!(first_agent.agent_status, AgentStatus::Blocked);
+
+        // Dialog A is dismissed and dialog B redraws in its place. No other
+        // AgentState value is visited in between, so the classifier lands on
+        // `Blocked` again for genuinely different on-screen content.
+        app.lookup_runtime_sender(0, pane_id)
+            .unwrap()
+            .test_process_pty_bytes(b"approval dialog B");
+
+        let second = app.handle_agent_get("req-2".into(), target);
+        let second: SuccessResponse = serde_json::from_str(&second).unwrap();
+        let ResponseResult::AgentInfo {
+            agent: second_agent,
+        } = second.result
+        else {
+            panic!("expected AgentInfo result, got {:?}", second.result);
+        };
+
+        assert_eq!(
+            second_agent.agent_status,
+            AgentStatus::Blocked,
+            "coarse status legitimately stays blocked across the dialog swap"
+        );
+        assert!(
+            second_agent.detection_content_seq > first_agent.detection_content_seq,
+            "detection_content_seq must advance even when agent_status does not: {} vs {}",
+            first_agent.detection_content_seq,
+            second_agent.detection_content_seq
+        );
+    }
+
+    #[tokio::test]
     async fn agent_prompt_focuses_copilot_before_submitting() {
         let mut app = app_with_agent();
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;

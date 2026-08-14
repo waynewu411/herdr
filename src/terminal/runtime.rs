@@ -570,6 +570,10 @@ impl TerminalRuntime {
     pub(crate) fn content_seq(&self) -> u64 {
         self.0.content_seq()
     }
+
+    pub(crate) fn detection_content_seq(&self) -> u64 {
+        self.0.detection_content_seq()
+    }
 }
 
 #[cfg(test)]
