@@ -6633,6 +6633,13 @@
                 "null"
               ]
             },
+            "detection_content_seq": {
+              "default": 0,
+              "description": "Monotonic counter that advances whenever new pane content was\nconsidered for agent detection, even when `agent_status` itself\ndoes not change (e.g. one approval dialog replaced by another).\nCompare against a previously observed value to detect that the\nunderlying screen changed without polling raw pane content.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
             "display_agent": {
               "type": [
                 "string",

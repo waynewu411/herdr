@@ -223,6 +223,13 @@ pub struct AgentInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub foreground_cwd: Option<String>,
     pub revision: u64,
+    /// Monotonic counter that advances whenever new pane content was
+    /// considered for agent detection, even when `agent_status` itself
+    /// does not change (e.g. one approval dialog replaced by another).
+    /// Compare against a previously observed value to detect that the
+    /// underlying screen changed without polling raw pane content.
+    #[serde(default)]
+    pub detection_content_seq: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
