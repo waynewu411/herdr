@@ -6634,11 +6634,13 @@
               ]
             },
             "detection_content_seq": {
-              "default": 0,
-              "description": "Monotonic counter that advances whenever new pane content was\nconsidered for agent detection, even when `agent_status` itself\ndoes not change (e.g. one approval dialog replaced by another).\nCompare against a previously observed value to detect that the\nunderlying screen changed without polling raw pane content.",
+              "description": "Counter that advances whenever new pane content arrived and was\nconsidered for agent detection, even when `agent_status` itself\ndoes not change (e.g. one approval dialog replaced by another). It\nis a coarse \"worth re-reading the pane\" signal, not an exact\ncontent diff: it can also advance on non-visible control sequences,\nanimation frames, or a plain resize, so treat an advance as a hint\nto re-check, not proof the visible screen changed.\n\nScoped to the pane's current runtime instance. It resets to 0 if\nthe pane's runtime is rebuilt (e.g. after a Herdr server\nrestart/handoff), so do not assume monotonicity across such a\nboundary — a smaller or absent (`null`) value does not mean no\ncontent arrived. `null` when no live runtime is currently attached\nto the pane.",
               "format": "uint64",
               "minimum": 0,
-              "type": "integer"
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "display_agent": {
               "type": [

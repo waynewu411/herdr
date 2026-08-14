@@ -551,13 +551,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agent_get_detection_content_seq_advances_across_blocked_to_blocked_redraw() {
-        // Regression test for issue #1: a pane can stay `agent_status: blocked`
-        // across two genuinely different screens (e.g. approval dialog A
-        // dismissed and immediately replaced by dialog B). `agent_status`
-        // itself is coarse and correctly stays `blocked` for both, but
-        // `detection_content_seq` must still move so a caller polling
-        // `agent get` can tell the underlying screen changed.
+    async fn agent_get_exposes_detection_content_seq_advancing_while_agent_status_is_constant() {
+        // Plumbing regression test for issue #1's reported symptom: prove
+        // `AgentInfo.detection_content_seq` is wired from the pane's live
+        // runtime through `agent get` and advances via the real production
+        // PTY-byte-arrival path (`PaneRuntime::test_process_pty_bytes`
+        // mirrors `on_read`'s call to `observe_detection_content_change`)
+        // while `agent_status` legitimately stays constant, matching the
+        // blocked(A)->blocked(B) scenario's *observable* shape.
+        //
+        // This test does NOT run the real manifest classifier or the two
+        // dedup layers named as the root cause (`should_publish_detection_update`
+        // in src/pane/agent_detection.rs, `emit_pane_state_update` in
+        // src/app/api.rs) -- the injected test runtime stubs out the
+        // detection task entirely. That the counter's advance is
+        // architecturally independent of the dedup gate's decision is
+        // proven separately by
+        // `agent_detection::tests::detection_content_seq_advances_across_dialog_swap_even_when_publish_is_suppressed`,
+        // which exercises `should_publish_detection_update` directly.
         let mut app = app_with_agent();
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
         let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
@@ -579,9 +590,10 @@ mod tests {
         };
         assert_eq!(first_agent.agent_status, AgentStatus::Blocked);
 
-        // Dialog A is dismissed and dialog B redraws in its place. No other
-        // AgentState value is visited in between, so the classifier lands on
-        // `Blocked` again for genuinely different on-screen content.
+        // Simulate dialog B's redraw arriving as new PTY bytes, via the same
+        // helper the production `on_read` callback exercises for the
+        // counter bump (see the doc comment above for what this does and
+        // does not prove).
         app.lookup_runtime_sender(0, pane_id)
             .unwrap()
             .test_process_pty_bytes(b"approval dialog B");
@@ -600,12 +612,46 @@ mod tests {
             AgentStatus::Blocked,
             "coarse status legitimately stays blocked across the dialog swap"
         );
+        let first_seq = first_agent
+            .detection_content_seq
+            .expect("live test runtime is attached, expected Some");
+        let second_seq = second_agent
+            .detection_content_seq
+            .expect("live test runtime is attached, expected Some");
         assert!(
-            second_agent.detection_content_seq > first_agent.detection_content_seq,
-            "detection_content_seq must advance even when agent_status does not: {} vs {}",
-            first_agent.detection_content_seq,
-            second_agent.detection_content_seq
+            second_seq > first_seq,
+            "detection_content_seq must advance even when agent_status does not: {first_seq} vs {second_seq}"
         );
+    }
+
+    #[tokio::test]
+    async fn agent_get_reports_detection_content_seq_none_without_a_live_runtime() {
+        // H1-adjacent regression test: when a pane has no live runtime
+        // attached (e.g. momentarily, between a respawn and re-registration),
+        // the field must be `None`, not a misleading `0` that a caller could
+        // confuse with "no content has arrived yet".
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_agent_name("reviewer".into());
+        terminal.set_detected_state(Some(Agent::GithubCopilot), AgentState::Blocked);
+        // Deliberately do not insert a test runtime for this pane.
+
+        let response = app.handle_agent_get(
+            "req".into(),
+            AgentTarget {
+                target: "reviewer".into(),
+            },
+        );
+        let response: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::AgentInfo { agent } = response.result else {
+            panic!("expected AgentInfo result, got {:?}", response.result);
+        };
+
+        assert_eq!(agent.detection_content_seq, None);
     }
 
     #[tokio::test]

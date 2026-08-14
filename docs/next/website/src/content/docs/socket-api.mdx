@@ -863,11 +863,21 @@ Agent waits observe semantic state, not arbitrary command completion.
 different underlying screens, for example when one approval dialog is
 dismissed and immediately replaced by another queued approval. Neither
 `pane.agent_status_changed` nor `agent wait --until blocked` re-fires for
-that kind of same-status transition. `agent get`/`agent list` responses
-include `detection_content_seq`, a monotonic counter that advances whenever
-new pane content was considered for agent detection, independent of
-`agent_status`. Compare it against a previously observed value to detect
-that the underlying screen changed without polling raw pane content by hand.
+that kind of same-status transition — both remain event/wait primitives for
+`agent_status` only. `agent get`/`agent list` responses include
+`detection_content_seq`, a counter that advances whenever new pane content
+arrived and was considered for agent detection, independent of
+`agent_status`. Compare it against a previously observed value to notice
+that new content arrived without polling raw pane content by hand.
+
+`detection_content_seq` is a coarse "worth re-reading the pane" hint, not an
+exact content diff: it can also advance on non-visible control sequences,
+animation frames, or a plain resize, so an advance does not by itself prove
+the visible screen changed. It is `null` when no live runtime is currently
+attached to the pane, and it is scoped to the pane's current runtime
+instance — it resets to 0 if the runtime is rebuilt (for example after a
+Herdr server restart/handoff), so do not assume monotonicity across such a
+boundary.
 
 ## Response shapes
 

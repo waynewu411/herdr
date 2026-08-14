@@ -223,13 +223,22 @@ pub struct AgentInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub foreground_cwd: Option<String>,
     pub revision: u64,
-    /// Monotonic counter that advances whenever new pane content was
+    /// Counter that advances whenever new pane content arrived and was
     /// considered for agent detection, even when `agent_status` itself
-    /// does not change (e.g. one approval dialog replaced by another).
-    /// Compare against a previously observed value to detect that the
-    /// underlying screen changed without polling raw pane content.
-    #[serde(default)]
-    pub detection_content_seq: u64,
+    /// does not change (e.g. one approval dialog replaced by another). It
+    /// is a coarse "worth re-reading the pane" signal, not an exact
+    /// content diff: it can also advance on non-visible control sequences,
+    /// animation frames, or a plain resize, so treat an advance as a hint
+    /// to re-check, not proof the visible screen changed.
+    ///
+    /// Scoped to the pane's current runtime instance. It resets to 0 if
+    /// the pane's runtime is rebuilt (e.g. after a Herdr server
+    /// restart/handoff), so do not assume monotonicity across such a
+    /// boundary — a smaller or absent (`null`) value does not mean no
+    /// content arrived. `null` when no live runtime is currently attached
+    /// to the pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detection_content_seq: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
