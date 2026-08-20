@@ -2605,7 +2605,27 @@ impl PaneRuntime {
         self.content_seq.load(Ordering::Acquire)
     }
 
+    /// Counter bumped whenever new PTY bytes arrive that the agent detector
+    /// considers for rescanning, or the pane is resized. Unlike
+    /// `agent_status`, this moves even when the classifier lands on the same
+    /// coarse `AgentState` value (e.g. a dismissed approval dialog
+    /// immediately replaced by a different one), so a caller can tell new
+    /// content arrived without polling raw pane content by hand. It is a
+    /// coarse "worth re-reading" hint, not an exact content diff: it also
+    /// advances on non-visible control sequences and animation frames, and
+    /// it resets to 0 whenever this `PaneRuntime` instance is rebuilt (e.g.
+    /// across a handoff/restart) — see `from_handoff_fd`.
+    pub(crate) fn detection_content_seq(&self) -> u64 {
+        self.detection_content_seq.load(Ordering::Relaxed)
+    }
+
     /// Resize if the dimensions actually changed.
+    ///
+    /// Bumps `detection_content_seq` unconditionally, unlike the PTY-byte
+    /// path (which only bumps it when `AgentDetection::Enabled`). Currently
+    /// unobservable through the public API for a detection-disabled pane
+    /// since `agent_info()` returns `None` for non-agent terminals, but note
+    /// the asymmetry if that changes.
     pub fn resize(&self, rows: u16, cols: u16, cell_width_px: u32, cell_height_px: u32) {
         let rows = rows.max(2);
         let cols = cols.max(4);
@@ -3032,6 +3052,7 @@ impl PaneRuntime {
 
     pub(crate) fn test_process_pty_bytes(&self, bytes: &[u8]) {
         self.content_seq.fetch_add(1, Ordering::AcqRel);
+        observe_detection_content_change(bytes, &self.detection_content_seq);
         let (tx, _rx) = mpsc::channel(1);
         let _ = self.terminal.process_pty_bytes(self.pane_id, 0, bytes, &tx);
         self.content_seq.fetch_add(1, Ordering::Release);
@@ -3180,6 +3201,32 @@ mod tests {
         *runtime.reported_cwd.lock().unwrap() = Some(cwd.clone());
 
         assert_eq!(runtime.follow_cwd(), Some(cwd));
+    }
+
+    #[tokio::test]
+    async fn detection_content_seq_advances_with_new_pty_bytes() {
+        let (runtime, _rx) = PaneRuntime::test_with_channel(80, 24);
+        assert_eq!(runtime.detection_content_seq(), 0);
+
+        runtime.test_process_pty_bytes(b"approval dialog A");
+        let after_first = runtime.detection_content_seq();
+        assert!(after_first > 0);
+
+        runtime.test_process_pty_bytes(b"approval dialog B");
+        assert!(runtime.detection_content_seq() > after_first);
+    }
+
+    #[tokio::test]
+    async fn detection_content_seq_advances_on_resize() {
+        let (runtime, _rx) = PaneRuntime::test_with_channel(80, 24);
+        assert_eq!(runtime.detection_content_seq(), 0);
+
+        runtime.resize(30, 90, 0, 0);
+
+        assert!(
+            runtime.detection_content_seq() > 0,
+            "resize() must bump detection_content_seq via mark_detection_content_changed"
+        );
     }
 
     #[test]
