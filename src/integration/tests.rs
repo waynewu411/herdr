@@ -1483,6 +1483,15 @@ fn kimi_question_hooks_report_blocked_until_the_question_finishes() {
 }
 
 #[test]
+fn kimi_background_task_completion_reports_working() {
+    assert!(KIMI_HOOK_EVENTS.contains(&(
+        "Notification",
+        Some(KIMI_TASK_COMPLETED_MATCHER),
+        "working",
+    )));
+}
+
+#[test]
 fn install_kimi_uses_kimi_code_home_env() {
     let _lock = integration_env_lock();
     let base = unique_base();

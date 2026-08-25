@@ -66,7 +66,8 @@ const KIMI_CONFIG_BLOCK_END: &str = "# <<< herdr kimi integration";
 const KIMI_MIN_VERSION: &str = "0.14.0";
 const KIMI_ASK_USER_QUESTION_MATCHER: &str = "^AskUserQuestion$";
 const KIMI_OTHER_TOOL_MATCHER: &str = "^(?!AskUserQuestion$).*$";
-const KIMI_HOOK_EVENTS: [(&str, Option<&str>, &str); 12] = [
+const KIMI_TASK_COMPLETED_MATCHER: &str = "task.completed";
+const KIMI_HOOK_EVENTS: [(&str, Option<&str>, &str); 13] = [
     ("SessionStart", None, "session"),
     ("UserPromptSubmit", None, "working"),
     ("PreToolUse", Some(KIMI_OTHER_TOOL_MATCHER), "working"),
@@ -89,6 +90,7 @@ const KIMI_HOOK_EVENTS: [(&str, Option<&str>, &str); 12] = [
     ("PreCompact", None, "working"),
     ("PermissionRequest", None, "blocked"),
     ("PermissionResult", None, "working"),
+    ("Notification", Some(KIMI_TASK_COMPLETED_MATCHER), "working"),
     ("Stop", None, "idle"),
     ("Interrupt", None, "idle"),
 ];
